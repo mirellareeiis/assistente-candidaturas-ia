@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Assistente de Candidaturas com IA</title>
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--tx:#1b2430;--mut:#5b6675;--ac:#1f4e79;--acbg:#e8f0f8;--bd:#d9e0e8;--ok:#1a7f4b;--wn:#b45309;--btx:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f141a;--card:#18202a;--tx:#e8edf3;--mut:#9aa7b6;--ac:#7db3e6;--acbg:#1d2b3a;--bd:#2a3644;--ok:#5fd09a;--wn:#f0b35a;--btx:#0f141a}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f141a;--card:#18202a;--tx:#e8edf3;--mut:#9aa7b6;--ac:#7db3e6;--acbg:#1d2b3a;--bd:#2a3644;--ok:#5fd09a;--wn:#f0b35a;--btx:#0f141a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+main{max-width:820px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;line-height:1.2;margin:0 0 6px;color:var(--ac)}
+.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-weight:600;margin:0 0 6px}
+textarea{width:100%;min-height:150px;resize:vertical;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.row{display:grid;gap:16px;grid-template-columns:1fr 1fr}
+@media (max-width:640px){.row{grid-template-columns:1fr}}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 18px;background:var(--ac);color:var(--btx);cursor:pointer}
+button.ghost{background:var(--acbg);color:var(--ac);padding:6px 12px;font-size:.85rem}
+button:disabled{opacity:.6;cursor:wait}
+.note{font-size:.85rem;color:var(--mut);margin-top:10px}
+.score{display:flex;align-items:center;gap:14px}
+.num{font-size:2.4rem;font-weight:700;color:var(--ac);line-height:1}
+.bar{flex:1;height:10px;background:var(--acbg);border-radius:99px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--ac)}
+h2{font-size:1.05rem;margin:0 0 8px;color:var(--ac)}
+ul{margin:0;padding-left:20px}
+li{margin:3px 0}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{background:var(--acbg);color:var(--ac);padding:3px 10px;border-radius:99px;font-size:.85rem}
+.pre{white-space:pre-wrap}
+.err{color:var(--wn);font-weight:600}
+.q{margin:0 0 10px}.q small{display:block;color:var(--mut)}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.head h2{margin:0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Assistente de Candidaturas com IA</h1>
+  <p class="sub">Cole uma vaga e o seu currículo. A IA mostra o que combina, o que falta, e já prepara um resumo adaptado, uma carta e perguntas de entrevista.</p>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="vaga">Descrição da vaga</label><textarea id="vaga" placeholder="Cole aqui o texto da vaga…"></textarea></div>
+      <div><label for="cv">Seu currículo ou perfil</label><textarea id="cv" placeholder="Cole aqui o texto do seu currículo…"></textarea></div>
+    </div>
+    <p style="margin:14px 0 0"><button id="go">Analisar candidatura</button></p>
+    <p class="note">Os textos são enviados à IA para gerar a análise. Não cole CPF, senhas ou outros dados sensíveis. A IA não deve inventar experiências: revise tudo antes de enviar.</p>
+  </div>
+
+  <div id="out" aria-live="polite"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const out = $("out");
+
+const PROMPT = `Você é um mentor de carreira que ajuda candidatos a estágio e vagas iniciais.
+Compare a VAGA com o CURRÍCULO e responda SOMENTE com um JSON válido, sem markdown, com estas chaves:
+- compatibilidade: número de 0 a 100
+- resumo_da_vaga: uma frase
+- pontos_fortes: array de 3 a 5 strings (o que do currículo combina com a vaga)
+- lacunas: array de 2 a 5 strings (o que a vaga pede e o currículo não mostra, com uma sugestão prática de como suprir)
+- palavras_chave: array de 6 a 10 termos da vaga que o candidato pode usar, SE forem verdadeiros
+- resumo_adaptado: 3 a 4 linhas, primeira pessoa, para o topo do currículo
+- carta: carta de apresentação de até 150 palavras
+- perguntas: array de 5 objetos {"pergunta": string, "dica": string} com perguntas prováveis de entrevista e uma dica de resposta
+REGRAS: nunca invente experiências, cursos, ferramentas ou resultados que não estejam no currículo. Se algo faltar, aponte em "lacunas". Escreva em português do Brasil, tom profissional e humano.`;
+
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function card(title, extra){
+  const c = el("div", "card"), h = el("div", "head");
+  h.appendChild(el("h2", null, title));
+  if (extra) h.appendChild(extra);
+  c.appendChild(h);
+  return c;
+}
+function list(items){
+  const u = el("ul");
+  (items || []).forEach(i => u.appendChild(el("li", null, String(i))));
+  return u;
+}
+function copyBtn(text){
+  const b = el("button", "ghost", "Copiar");
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(text); b.textContent = "Copiado ✓"; }
+    catch (e) { b.textContent = "Selecione e copie"; }
+    setTimeout(() => b.textContent = "Copiar", 2000);
+  };
+  return b;
+}
+
+function render(r){
+  out.replaceChildren();
+  const n = Math.max(0, Math.min(100, Number(r.compatibilidade) || 0));
+
+  const s = card("Compatibilidade");
+  const sc = el("div", "score");
+  sc.appendChild(el("div", "num", n + "%"));
+  const bar = el("div", "bar"), fill = document.createElement("i");
+  fill.style.width = n + "%"; bar.appendChild(fill); sc.appendChild(bar);
+  s.appendChild(sc);
+  if (r.resumo_da_vaga) s.appendChild(el("p", "note", r.resumo_da_vaga));
+  out.appendChild(s);
+
+  const f = card("Pontos fortes"); f.appendChild(list(r.pontos_fortes)); out.appendChild(f);
+  const l = card("O que falta mostrar"); l.appendChild(list(r.lacunas)); out.appendChild(l);
+
+  const k = card("Palavras-chave da vaga");
+  const t = el("div", "tags");
+  (r.palavras_chave || []).forEach(w => t.appendChild(el("span", "tag", String(w))));
+  k.appendChild(t);
+  k.appendChild(el("p", "note", "Use só as que forem verdadeiras no seu caso."));
+  out.appendChild(k);
+
+  const a = card("Resumo adaptado", copyBtn(r.resumo_adaptado || ""));
+  a.appendChild(el("p", "pre", r.resumo_adaptado || "")); out.appendChild(a);
+
+  const c = card("Carta de apresentação", copyBtn(r.carta || ""));
+  c.appendChild(el("p", "pre", r.carta || "")); out.appendChild(c);
+
+  const q = card("Perguntas de entrevista");
+  (r.perguntas || []).forEach(p => {
+    const d = el("p", "q", p.pergunta || "");
+    d.appendChild(el("small", null, "Dica: " + (p.dica || "")));
+    q.appendChild(d);
+  });
+  out.appendChild(q);
+}
+
+function msg(text){
+  out.replaceChildren();
+  const c = el("div", "card"); c.appendChild(el("p", "err", text)); out.appendChild(c);
+}
+
+$("go").onclick = async () => {
+  const vaga = $("vaga").value.trim(), cv = $("cv").value.trim();
+  if (vaga.length < 40 || cv.length < 40) { msg("Cole o texto completo da vaga e do currículo para uma análise útil."); return; }
+  const btn = $("go");
+  btn.disabled = true; btn.textContent = "Analisando…";
+  msg("Analisando a sua candidatura…");
+  try {
+    const sample = await claude.use("sample");
+    if (!sample) { msg("A IA não está disponível nesta visualização."); return; }
+    const r = await sample.json(PROMPT + "\n\nVAGA:\n" + vaga + "\n\nCURRÍCULO:\n" + cv, { cache: false });
+    render(r);
+  } catch (e) {
+    msg(e && e.code === "rate_limited" ? "Muitas tentativas seguidas. Aguarde um pouco e tente de novo."
+      : e && e.code === "not_granted" ? "A permissão para usar a IA foi negada. Recarregue a página para tentar de novo."
+      : "Não consegui gerar a análise agora. Tente novamente.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Analisar candidatura";
+  }
+};
+</script>
+</body>
+</html>
